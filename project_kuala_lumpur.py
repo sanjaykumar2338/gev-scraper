@@ -9,6 +9,7 @@ import time
 import json
 import traceback
 import tempfile
+from db import get_connection
 
 # Initialize to None to prevent NameError in finally block
 conn = None
@@ -20,13 +21,7 @@ def log_error(error_message):
         f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {error_message}\n")
 
 try:
-    conn = pymysql.connect(
-        host='localhost',
-        user='root',
-        password='',
-        database='project-swasta',
-        charset='utf8mb4'
-    )
+    conn = get_connection()
     cursor = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
