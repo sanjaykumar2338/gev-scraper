@@ -211,9 +211,9 @@ try:
             log_error(f"Error scraping project {link}:\n{str(e)}\n{traceback.format_exc()}")
 
     driver.get("https://teduh.kpkt.gov.my/project-swasta")
-    time.sleep(5)
+    time.sleep(10)
     Select(driver.find_element(By.ID, "state")).select_by_value("14")
-    time.sleep(2)
+    time.sleep(5)
     driver.find_element(By.CSS_SELECTOR, "button.cari-button").click()
     time.sleep(5)
 
