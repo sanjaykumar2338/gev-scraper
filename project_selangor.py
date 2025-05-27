@@ -8,37 +8,53 @@ from datetime import datetime
 import time
 import json
 import traceback
+import tempfile
+from db import get_connection
 
-# Error logger
+# Initialize to None to prevent NameError in finally block
+conn = None
+cursor = None
+driver = None
+
 def log_error(error_message):
     with open("scraper_errors.log", "a", encoding="utf-8") as f:
         f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {error_message}\n")
 
+def ensure_connection_alive():
+    global conn, cursor
+    try:
+        conn.ping(reconnect=True)
+    except:
+        conn = get_connection()
+        cursor = conn.cursor()
+
 try:
-    # MySQL connection
-    conn = pymysql.connect(
-        host='localhost',
-        user='root',
-        password='',
-        database='project-swasta',
-        charset='utf8mb4'
-    )
+    conn = get_connection()
     cursor = conn.cursor()
-
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # Setup headless browser
+    
+    temp_profile_dir = tempfile.mkdtemp()
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-infobars")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--remote-debugging-port=9222")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--start-maximized")
+    options.add_argument(f"--user-data-dir={temp_profile_dir}")
+
     driver = webdriver.Chrome(options=options)
 
-    # === Helper functions ===
     def get_total_pages():
         soup = BeautifulSoup(driver.page_source, "html.parser")
         pagination = soup.select("ul.pagination li a")
         page_numbers = [int(a.text.strip()) for a in pagination if a.text.strip().isdigit()]
-        return max(page_numbers) if page_numbers else 1
+        max_pages = max(page_numbers) if page_numbers else 1
+        print(f"Total pages found: {max_pages}")
+        return max_pages
 
     def get_value(soup, label):
         try:
@@ -141,14 +157,17 @@ try:
             if unit_detail:
                 data["unit_detail_url"] = unit_detail["href"]
 
+            ensure_connection_alive()
             cursor.execute("SELECT id FROM project_details WHERE project_code = %s", (data["project_code"],))
             existing = cursor.fetchone()
 
             if existing:
                 project_id = existing[0]
+                ensure_connection_alive()
                 cursor.execute("DELETE FROM project_units_summary WHERE project_id = %s", (project_id,))
                 cursor.execute("DELETE FROM project_unit_box_view WHERE project_id = %s", (project_id,))
             else:
+                ensure_connection_alive()
                 cursor.execute("""
                     INSERT INTO project_details (
                         license_number, license_valid_from, license_valid_to, developer_name,
@@ -167,6 +186,7 @@ try:
             for row in soup.select("table tbody.bg-teduh-mid.bg-opacity-25 tr"):
                 cols = [td.get_text(strip=True) for td in row.find_all("td")]
                 if len(cols) == 12:
+                    ensure_connection_alive()
                     cursor.execute("""
                         INSERT INTO project_units_summary (
                             project_id, house_type, floors, rooms, toilets, built_up_area,
@@ -185,6 +205,7 @@ try:
                     tooltip_json = box.get("data-tooltip")
                     if tooltip_json:
                         parsed = json.loads(tooltip_json.replace("&quot;", '"'))
+                        ensure_connection_alive()
                         cursor.execute("""
                             INSERT INTO project_unit_box_view (
                                 project_id, no_unit, no_pt_lot_plot, kuota_bumi,
@@ -200,16 +221,13 @@ try:
                             parsed.get("Status Jualan", ""),
                             now, now
                         ))
-
         except Exception as e:
-            log_error(f"Error scraping project {link}: {str(e)}\n{traceback.format_exc()}")
+            log_error(f"Error scraping project {link}:\n{str(e)}\n{traceback.format_exc()}")
 
-    # Start scraping
     driver.get("https://teduh.kpkt.gov.my/project-swasta")
+    time.sleep(10)
+    Select(driver.find_element(By.ID, "state")).select_by_value("10")
     time.sleep(5)
-
-    Select(driver.find_element(By.ID, "state")).select_by_value("10")  # Adjust state as needed
-    time.sleep(2)
     driver.find_element(By.CSS_SELECTOR, "button.cari-button").click()
     time.sleep(5)
 
@@ -224,17 +242,19 @@ try:
                 if len(cols) >= 7:
                     detail_url = cols[6].find("a")["href"]
                     scrape_project(detail_url)
+                    ensure_connection_alive()
                     conn.commit()
             except Exception as e:
-                log_error(f"Error scraping row on page {page}: {str(e)}\n{traceback.format_exc()}")
+                log_error(f"Error scraping row on page {page}:\n{str(e)}\n{traceback.format_exc()}")
 
 except Exception as e:
-    log_error(f"Critical error in main scraper: {str(e)}\n{traceback.format_exc()}")
+    log_error(f"Critical script error:\n{str(e)}\n{traceback.format_exc()}")
+
 finally:
-    try:
+    if cursor:
         cursor.close()
+    if conn:
         conn.close()
-    except:
-        pass
-    driver.quit()
-    print("✅ Scraping finished.")
+    if driver:
+        driver.quit()
+    print("\u2705 Monthly scrape completed with full project, summary, and unit box view data.")

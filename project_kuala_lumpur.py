@@ -20,6 +20,14 @@ def log_error(error_message):
     with open("scraper_errors.log", "a", encoding="utf-8") as f:
         f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {error_message}\n")
 
+def ensure_connection_alive():
+    global conn, cursor
+    try:
+        conn.ping(reconnect=True)
+    except:
+        conn = get_connection()
+        cursor = conn.cursor()
+
 try:
     conn = get_connection()
     cursor = conn.cursor()
@@ -27,7 +35,6 @@ try:
     
     temp_profile_dir = tempfile.mkdtemp()
     options = Options()
-    
     options.add_argument("--headless")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
@@ -150,14 +157,17 @@ try:
             if unit_detail:
                 data["unit_detail_url"] = unit_detail["href"]
 
+            ensure_connection_alive()
             cursor.execute("SELECT id FROM project_details WHERE project_code = %s", (data["project_code"],))
             existing = cursor.fetchone()
 
             if existing:
                 project_id = existing[0]
+                ensure_connection_alive()
                 cursor.execute("DELETE FROM project_units_summary WHERE project_id = %s", (project_id,))
                 cursor.execute("DELETE FROM project_unit_box_view WHERE project_id = %s", (project_id,))
             else:
+                ensure_connection_alive()
                 cursor.execute("""
                     INSERT INTO project_details (
                         license_number, license_valid_from, license_valid_to, developer_name,
@@ -176,6 +186,7 @@ try:
             for row in soup.select("table tbody.bg-teduh-mid.bg-opacity-25 tr"):
                 cols = [td.get_text(strip=True) for td in row.find_all("td")]
                 if len(cols) == 12:
+                    ensure_connection_alive()
                     cursor.execute("""
                         INSERT INTO project_units_summary (
                             project_id, house_type, floors, rooms, toilets, built_up_area,
@@ -194,6 +205,7 @@ try:
                     tooltip_json = box.get("data-tooltip")
                     if tooltip_json:
                         parsed = json.loads(tooltip_json.replace("&quot;", '"'))
+                        ensure_connection_alive()
                         cursor.execute("""
                             INSERT INTO project_unit_box_view (
                                 project_id, no_unit, no_pt_lot_plot, kuota_bumi,
@@ -230,6 +242,7 @@ try:
                 if len(cols) >= 7:
                     detail_url = cols[6].find("a")["href"]
                     scrape_project(detail_url)
+                    ensure_connection_alive()
                     conn.commit()
             except Exception as e:
                 log_error(f"Error scraping row on page {page}:\n{str(e)}\n{traceback.format_exc()}")
