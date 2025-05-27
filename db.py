@@ -5,8 +5,8 @@ import pymysql
 def get_connection():
     return pymysql.connect(
         host='localhost',
-        user='root',
-        password='',
+        user='sanjay_gvsite',
+        password='CdZehwfq-8H)l9g%',
         database='project-swasta',
         charset='utf8mb4'
     )
